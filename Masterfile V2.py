@@ -2,8 +2,6 @@ import os
 import time
 import pandas as pd
 from collections import defaultdict
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
 
 start_time = time.time()
 
@@ -11,7 +9,7 @@ main_folder = r"C:\Users\ymohdzaifullizan\OneDrive - Dyson\Year 2 rotation - E&O
 summary_filename = "master_summary.xlsx"
 headers = [
     'Initial Claim submission Date','CR Number','CR Description','EOP Strategy','CM','EOP Declaration Timing','Last Time Build','Dyson PIC',
-    'Product Category','Project','Model', 'Initial Submission Currency','Initial Submission','Claim Received (RM)','Claim Accepted (RM)','Claim value pending SAF/PR approval (RM)',
+    'Product Category','Project','Model', 'Initial Submission','Claim Received (RM)','Claim Accepted (RM)','Claim value pending SAF/PR approval (RM)',
     'Claim Avoided (RM)','Claim in Progress (RM)','WIP (RM/USD)','Remark/Current Status','One Time Settlement','Claim Status','Finance Status',
     'CM Claim No (Commercial Title)','PR Number','PO Number','GR Status','GR Amount','Accrued/GR Amt','Provision','Check'
 ]
@@ -84,8 +82,6 @@ def extract_exposure_metadata(df):
 
 def extract_claim_fields(claim_df):
     claim_map = {}
-    submission_currency = claim_df.iloc[37,1] #B38 == index 37; this is the currency for all claim values
-    claim_map["Initial Submission Currency"] = submission_currency if pd.notnull(submission_currency) else ""
     # C&D == 2,3; rows 38-43 == index 37-42
     for i in range(37, 43):
         k = str(claim_df.iloc[i,2]).strip().lower() if pd.notnull(claim_df.iloc[i,2]) else ""
@@ -135,46 +131,6 @@ with pd.ExcelWriter(os.path.join(main_folder, summary_filename), engine='openpyx
         df_out.to_excel(writer, sheet_name=sheet_name, index=False)
     print(f"Summary saved as {summary_filename} in {main_folder}")
 
-def format_initial_submission_column_by_currency(file_path, sheet_names):
-    wb = load_workbook(file_path)
-    for sheet_name in sheet_names:
-        ws = wb[sheet_name]
-        # Find the column indices for your headers
-        headers_row = 1
-        initial_sub_col = None
-        currency_col = None
-        # Find headers
-        for idx, cell in enumerate(ws[headers_row], start=1):
-            if cell.value == "Initial Submission":
-                initial_sub_col = get_column_letter(idx)
-            if cell.value == "Initial Submission Currency":
-                currency_col = get_column_letter(idx)
-        if not initial_sub_col or not currency_col:
-            print(f"Couldn't find required columns in {sheet_name}, skipping.")
-            continue
-        for row in range(2, ws.max_row + 1):
-            currency = ws[f"{currency_col}{row}"].value
-            cell = ws[f"{initial_sub_col}{row}"]
-            if currency == "MYR" or currency == "RM":
-                cell.number_format = '_("RM"* #,##0.00_);_("RM"* (#,##0.00);_("RM"* "-"??_);_(@_)'
-            elif currency == "USD":
-                cell.number_format = '_("$"* #,##0.00_);_("$"* (#,##0.00);_("$"* "-"??_);_(@_)'
-            elif currency == "EUR":
-                cell.number_format = _('_("€"* #,##0.00_);_("€"* (#,##0.00);_("€"* "-"??_);_(@_)')
-            elif currency in ["GBP", "£"]:
-                cell.number_format = '_("£"* #,##0.00_);_("£"* (#,##0.00);_("£"* "-"??_);_(@_)'
-            elif currency in ["CNY", "RMB", "¥"]:
-                cell.number_format = '_("¥"* #,##0.00_);_("¥"* (#,##0.00);_("¥"* "-"??_);_(@_)'
-            # Add more currency logic as needed.
-    wb.save(file_path)
-    print("Formatting applied!")
-
-# Usage after saving your summary file:
-sheet_names = [f"Masterfile {year}" for year in ranging_out_lookup.keys()]
-format_initial_submission_column_by_currency(
-    os.path.join(main_folder, summary_filename),
-    sheet_names
-)
 end_time = time.time()
 elapsed_time = end_time - start_time
 print(f"Elapsed time: {elapsed_time:.2f} seconds")

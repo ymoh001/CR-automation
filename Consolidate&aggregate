@@ -1,7 +1,8 @@
 import os
-import time
 import pandas as pd
+import time as time
 from datetime import datetime
+import re
 
 start_time = time.time()
 
@@ -26,14 +27,17 @@ exchange_dict = {
     if not pd.isnull(row[selected_month])
 }
 
+# Files/folders
 main_folder = r"C:\Users\ymohdzaifullizan\OneDrive - Dyson\Year 2 rotation - E&O\Consolidate Exposure\Test setup 2\Sample file 2"
 output_folder = r"C:\Users\ymohdzaifullizan\OneDrive - Dyson\Year 2 rotation - E&O\Consolidate Exposure\Test setup 2\Python outputs"
 output_file = os.path.join(output_folder, "mitigation.xlsx")
+
+# Part headers (add 'Product Category')
 part_headers = [
-    "Data entry", "CR", "Model", "Project", "LTB", "CM", "Dyson PN", "DESCRIPTION", "Supplier", "Commodity", "Currency", "Unit Price", 
+    "Data entry", "CR", "Model", "Project", "LTB", "CM", "Product Category", "Dyson PN", "DESCRIPTION", "Supplier", "Commodity", "Currency", "Unit Price", 
     "OPO", "OPO $", "SOH", "SOH $", "Other mitigation cost $", "Total Exposure Qty", "Total Exposure $", "Total exposure in MYR", "RDD Remark", "Other Remark"
 ]
-# mapping from target header to part table header (if any)
+
 header_map = {
     "Dyson PN": "Dyson PN no rev",
     "DESCRIPTION": "DESCRIPTION",
@@ -52,14 +56,14 @@ header_map = {
 }
 
 def extract_metadata(df):
-    # Scan first 20 rows for the relevant keywords in column A, return value in column C
-    meta = {"CR": "", "Model": "", "Project": "", "CM": ""}
+    # Scan first 20 rows for keywords in col A, return values from col C
+    meta = {"CR": "", "Model": "", "Project": "", "CM": "", "Product Category": ""}
     for i in range(20):
         keycell = str(df.iloc[i, 0]).strip().lower() if pd.notnull(df.iloc[i, 0]) else ""
         valcell = str(df.iloc[i, 2]).strip() if pd.notnull(df.iloc[i, 2]) else ""
         if "contract manufacturing" in keycell:
             meta["CM"] = valcell
-        elif "model name" in keycell:   # e.g. "SV25 X285"
+        elif "model name" in keycell:
             words = valcell.split()
             if len(words) > 0:
                 meta["Model"] = words[0]
@@ -67,16 +71,9 @@ def extract_metadata(df):
                 meta["Project"] = words[1]
         elif "remarks" in keycell:
             meta["CR"] = valcell
+        elif "category" in keycell:
+            meta["Product Category"] = valcell
     return meta
-
-def compute_myr(row):
-    currency = str(row["Currency"]).strip().upper()
-    exposure = pd.to_numeric(row["Total Exposure $"], errors="coerce")
-    rate = exchange_dict.get(currency, 1.0)
-    print(f"Row Currency: {currency} | Exposure: {exposure} | Rate: {rate}")
-    if pd.isnull(exposure):
-        return ""
-    return round(exposure * rate, 2)
 
 all_rows = []
 
@@ -89,21 +86,16 @@ for filename in os.listdir(main_folder):
         df = pd.read_excel(filepath, sheet_name="Appendix 2", header=None)
         metadata = extract_metadata(df)
         today_str = datetime.now().strftime("%Y-%m-%d")
-
-        # Find and extract header rows first
-        # ----------------------
         # Block 1
         header_row1 = 19
         block1 = df.iloc[header_row1:300, 0:15].copy()
-        block1.columns = block1.iloc[0]   # Header
+        block1.columns = block1.iloc[0]
         block1 = block1.iloc[1:].reset_index(drop=True)
         # Block 2
         header_row2 = 19
         block2 = df.iloc[header_row2:300, 117:128].copy()
-        block2.columns = block2.iloc[0]   # Header
+        block2.columns = block2.iloc[0]
         block2 = block2.iloc[1:].reset_index(drop=True)
-        # NB: adjust header_row1/header_row2 if your actual header is not 19!
-
         length = min(len(block1), len(block2))
         for i in range(length):
             row1 = block1.iloc[i]
@@ -113,42 +105,87 @@ for filename in os.listdir(main_folder):
                 "CR": metadata.get("CR", ""),
                 "Model": metadata.get("Model", ""),
                 "Project": metadata.get("Project", ""),
-                "CM": metadata.get("CM", "")
+                "LTB": row1.get("LT (Wks)", ""),
+                "CM": metadata.get("CM", ""),
+                "Product Category": metadata.get("Product Category", "")
             }
-            # Fill part_headers from both blocks using your header_map
             for h in part_headers:
                 if h in output_row:
-                    continue  # already filled from metadata
+                    continue
                 val = ""
-                # First try from block1
                 col1 = header_map.get(h)
                 if col1 and col1 in row1.index:
                     val = row1[col1]
-                # If not in block1, try block2
                 if not val and col1 and col1 in row2.index:
                     val = row2[col1]
                 output_row[h] = val
             all_rows.append(output_row)
-
     except Exception as e:
         print(f"Error processing {filename}: {e}")
 
-if all_rows:
-    consolidated_df = pd.DataFrame(all_rows, columns=part_headers)
-    consolidated_df = consolidated_df[
+if not all_rows:
+    print("No data rows found to consolidate.")
+    exit()
+
+consolidated_df = pd.DataFrame(all_rows, columns=part_headers)
+consolidated_df = consolidated_df[
     consolidated_df["Dyson PN"].notnull() & 
     (consolidated_df["Dyson PN"] != "") &
     (pd.to_numeric(consolidated_df["Total Exposure $"], errors='coerce') != 0) &
     (pd.to_numeric(consolidated_df["Total Exposure $"], errors='coerce').notnull())
+]
+
+def compute_myr(row):
+    currency = str(row["Currency"]).strip().upper()
+    exposure = pd.to_numeric(row["Total Exposure $"], errors="coerce")
+    rate = exchange_dict.get(currency, 1.0)
+    if pd.isnull(exposure):
+        return ""
+    return round(exposure * rate, 2)
+
+consolidated_df["Total exposure in MYR"] = consolidated_df.apply(compute_myr, axis=1)
+
+def aggregator(df):
+    sum_columns = [
+        "OPO", "OPO $", "SOH", "SOH $", "Other mitigation cost $",
+        "Total Exposure Qty", "Total Exposure $"
     ]
-    consolidated_df["Total exposure in MYR"] = consolidated_df.apply(compute_myr, axis=1)
-    consolidated_df.to_excel(output_file, index=False)
-    print(f"Saved consolidated parts list to {output_file}")
-else:
-    print("No data rows found to consolidate.")
+    cat_columns = [
+        "Data entry", "CR", "Model", "Project", "LTB", "CM", "Supplier", "Product Category"
+    ]
+    agg = {}
+    for col in sum_columns:
+        agg[col] = df[col].apply(pd.to_numeric, errors='coerce').sum()
+    for col in cat_columns:
+        agg[col] = "; ".join(sorted(set(str(x) for x in df[col] if pd.notnull(x) and str(x).strip())))
+    # "Currency", "Unit Price" handled simply
+    #agg["Currency"] = "; ".join(sorted(set(str(x) for x in df["Currency"] if pd.notnull(x) and str(x).strip())))
+    agg["Unit Price"] = ", ".join(sorted(set(str(x) for x in df["Unit Price"] if pd.notnull(x) and str(x).strip())))
+    agg["Total exposure in MYR"] = df["Total exposure in MYR"].apply(pd.to_numeric, errors='coerce').sum()
+    for extra in ["DESCRIPTION", "Commodity", "RDD Remark", "Other Remark"]:
+        values = [x for x in df[extra] if pd.notnull(x) and str(x).strip()]
+        agg[extra] = "; ".join(sorted(set(map(str, values))))
+    return pd.Series(agg)
 
+order = part_headers
 
+# === Write each product category to its own "Raw" and "Agg" sheet ===
+def safe_sheet_name(name, prefix="Raw"):
+    safe = re.sub(r'[^A-Za-z0-9 ]', '', str(name))[:25]
+    return f"{prefix} - {safe}"
 
-end_time = time.time()
-elapsed_time = end_time - start_time
-print(f"Elapsed time: {elapsed_time:.2f} seconds")
+with pd.ExcelWriter(output_file, engine="openpyxl", mode="w") as writer:
+    categories = consolidated_df['Product Category'].dropna().unique()
+    for cat in categories:
+        df_cat = consolidated_df[consolidated_df['Product Category'] == cat]
+        df_cat.to_excel(writer, sheet_name=safe_sheet_name(cat, "Raw"), index=False)
+        grouped = df_cat.groupby(["Dyson PN", "Currency"]).apply(aggregator).reset_index()
+        grouped = grouped[order]
+        grouped.to_excel(writer, sheet_name=safe_sheet_name(cat, "Agg"), index=False)
+    # Optionally write all rows:
+    consolidated_df.to_excel(writer, sheet_name="Raw - ALL", index=False)
+    all_grouped = consolidated_df.groupby(["Dyson PN", "Currency"]).apply(aggregator).reset_index()
+    all_grouped = all_grouped[order]
+    all_grouped.to_excel(writer, sheet_name="Agg - ALL", index=False)
+
+print(f"Done. Excel file with all categories output to {output_file}")

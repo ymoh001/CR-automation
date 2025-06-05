@@ -8,6 +8,8 @@ from openpyxl.utils import get_column_letter
 start_time = time.time()
 
 main_folder = r"C:\Users\ymohdzaifullizan\OneDrive - Dyson\Year 2 rotation - E&O\Consolidate Exposure\Test setup 2\Sample file 2"
+output_folder = r"C:\Users\ymohdzaifullizan\OneDrive - Dyson\Year 2 rotation - E&O\Consolidate Exposure\Test setup 2\Python outputs"
+output_file = os.path.join(output_folder, summary_filename)
 summary_filename = "master_summary.xlsx"
 headers = [
     'Initial Claim submission Date','CR Number','CR Description','EOP Strategy','CM','EOP Declaration Timing','Last Time Build','Dyson PIC',
@@ -172,7 +174,7 @@ def format_initial_submission_column_by_currency(file_path, sheet_names):
 # Usage after saving your summary file:
 sheet_names = [f"Masterfile {year}" for year in ranging_out_lookup.keys()]
 format_initial_submission_column_by_currency(
-    os.path.join(main_folder, summary_filename),
+    output_file,
     sheet_names
 )
 end_time = time.time()

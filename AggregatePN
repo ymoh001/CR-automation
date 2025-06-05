@@ -1,0 +1,55 @@
+import os
+import pandas as pd
+
+# File paths
+output_folder = r"C:\Users\ymohdzaifullizan\OneDrive - Dyson\Year 2 rotation - E&O\Consolidate Exposure\Test setup 2\Python outputs"
+input_file = os.path.join(output_folder, "mitigation.xlsx")
+output_file = input_file  # Overwrite (<- same file, add new sheet)
+
+# Read original data
+consolidated_df = pd.read_excel(input_file)
+
+# Columns to sum (for same Dyson PN & Currency)
+sum_columns = [
+    "OPO", "OPO $", "SOH", "SOH $", "Other mitigation cost $",
+    "Total Exposure Qty", "Total Exposure $"
+]
+# Columns to concatenate
+cat_columns = [
+    "Data entry", "CR", "Model", "Project", "LTB", "CM", "Supplier"
+]
+
+# Aggregator function
+def aggregator(df):
+    agg = {}
+    for col in sum_columns:
+        agg[col] = df[col].apply(pd.to_numeric, errors='coerce').sum()
+    for col in cat_columns:
+        agg[col] = "| ".join(sorted(set(str(x) for x in df[col] if pd.notnull(x) and str(x).strip())))
+    #agg["Currency"] = "; ".join(sorted(set(str(x) for x in df["Currency"] if pd.notnull(x) and str(x).strip())))
+    agg["Unit Price"] = "| ".join(sorted(set(str(x) for x in df["Unit Price"] if pd.notnull(x) and str(x).strip())))
+    # Sum total exposure in MYR regardless of currency
+    agg["Total exposure in MYR"] = df["Total exposure in MYR"].apply(pd.to_numeric, errors='coerce').sum()
+    # Carry other columns like DESCRIPTION, Commodity, RDD Remark, Other Remark, taking first non-null if needed
+    for extra in ["DESCRIPTION", "Commodity", "RDD Remark", "Other Remark"]:
+        values = [x for x in df[extra] if pd.notnull(x) and str(x).strip()]
+        agg[extra] = "| ".join(sorted(set(map(str, values))))
+    return pd.Series(agg)
+
+order = [
+    "Data entry", "CR", "Model", "Project", "LTB", "CM", "Dyson PN", "DESCRIPTION", "Supplier", 
+    "Commodity", "Currency", "Unit Price", "OPO", "OPO $", "SOH", "SOH $", "Other mitigation cost $",
+    "Total Exposure Qty", "Total Exposure $", "Total exposure in MYR", "RDD Remark", "Other Remark"
+]
+
+# Group & aggregate
+grouped = consolidated_df.groupby(["Dyson PN", "Currency"]).apply(aggregator).reset_index()
+
+# Reorder columns
+grouped = grouped[order]
+
+# Write to a new sheet in same file
+with pd.ExcelWriter(output_file, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+    grouped.to_excel(writer, sheet_name="Consolidated", index=False)
+
+print(f"Consolidated sheet written to {output_file} in sheet 'Consolidated'")

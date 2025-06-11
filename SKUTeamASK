@@ -1,0 +1,58 @@
+#does not include claim received in the summary and calculations
+
+import pandas as pd
+
+# File paths
+master_file = r"C:\Users\ymohdzaifullizan\OneDrive - Dyson\Year 2 rotation - E&O\Consolidate Exposure\Test setup 2\Python outputs\masterfile.xlsx"
+populate_file   = r"C:\Users\ymohdzaifullizan\OneDrive - Dyson\Year 2 rotation - E&O\Consolidate Exposure\Test setup 2\SKU Team ask.xlsx"
+
+# Stack all master file data
+master_sheets = pd.read_excel(master_file, sheet_name=None)
+all_master = pd.concat([df.assign(__sheet__=name) for name, df in master_sheets.items()], ignore_index=True)
+all_master.columns = [str(c).strip() for c in all_master.columns]
+
+claim_cols = [
+    "Claim Accepted (RM)",
+    "Claim value pending SAF/PR approval (RM)",
+    "Claim Avoided (RM)",
+    "Claim in Progress (RM)"
+]
+
+summary = all_master.groupby('CR Number', dropna=True)[claim_cols].sum(min_count=1).reset_index()
+miti_sum = summary.set_index("CR Number")[claim_cols].to_dict(orient="index")
+
+pop_sheets = pd.read_excel(populate_file, sheet_name=None)
+
+for sheet_name, pop_df in pop_sheets.items():
+    pop_df.columns = [str(c).strip() for c in pop_df.columns]
+    pop_df["E&O CR Total Value"] = ""
+    pop_df["E&O CR Settled Value"] = ""
+    pop_df["E&O CR Outstanding"] = ""
+
+    for cr, cr_rows in pop_df.groupby("E&O CR ID"):
+        x = len(cr_rows)
+        if cr not in miti_sum:
+            continue
+        claim = miti_sum[cr]
+        try: claim_accepted = float(claim.get("Claim Accepted (RM)", 0) or 0)
+        except: claim_accepted = 0
+        try: claim_value_pending = float(claim.get("Claim value pending SAF/PR approval (RM)", 0) or 0)
+        except: claim_value_pending = 0
+        try: claim_avoided = float(claim.get("Claim Avoided (RM)", 0) or 0)
+        except: claim_avoided = 0
+        try: claim_in_progress = float(claim.get("Claim in Progress (RM)", 0) or 0)
+        except: claim_in_progress = 0
+        y = claim_accepted / x if x else 0
+        z = (claim_value_pending + claim_in_progress) / x if x else 0
+        w = claim_avoided / x if x else 0
+        mask = pop_df["E&O CR ID"] == cr
+        pop_df.loc[mask, "E&O CR Total Value"] = y
+        pop_df.loc[mask, "E&O CR Outstanding"] = z
+        pop_df.loc[mask, "E&O CR Settled Value"] = w
+
+    pop_sheets[sheet_name] = pop_df
+
+with pd.ExcelWriter(populate_file, engine="openpyxl", mode="w") as writer:
+    for sheet_name, df in pop_sheets.items():
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+print(f"Output overwritten in {populate_file}")
